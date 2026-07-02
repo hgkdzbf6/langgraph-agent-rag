@@ -1,0 +1,7 @@
+langgraph>=0.2.0
+openai>=1.40.0        # 用其 OpenAI 兼容 SDK 调用智谱 coding-plan 网关
+faiss-cpu>=1.8.0
+numpy>=1.24.0
+tiktoken>=0.7.0
+python-dotenv>=1.0.0
+requests>=2.31.0
