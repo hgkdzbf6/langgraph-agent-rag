@@ -16,16 +16,33 @@ from .vector_store import VectorStore
 from .reranker import Reranker, MMRReranker, NoopReranker
 
 
+_SKIP_DIRS = {".git", ".obsidian", ".mimocode", "__pycache__", ".embed_cache",
+              "node_modules", ".venv", "venv"}
+_SKIP_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp",
+                  ".pdf", ".zip", ".tar", ".gz", ".canvas", ".excalidraw"}
+
+
 def _load_docs_from_dir(dir_: str) -> list[dict[str, str]]:
-    """递归读取目录下 .txt/.md 文件作为文档。"""
+    """递归读取目录下 .txt/.md 文件作为文档，跳过隐藏目录和非文本文件。"""
     docs: list[dict[str, str]] = []
     p = Path(dir_)
     if not p.exists():
         return docs
     for f in sorted(p.rglob("*")):
+        # 跳过指定目录
+        if any(part in _SKIP_DIRS for part in f.parts):
+            continue
+        # 跳过非文本后缀
+        if f.suffix.lower() in _SKIP_SUFFIXES:
+            continue
         if f.suffix.lower() in (".txt", ".md"):
-            docs.append({"text": f.read_text(encoding="utf-8", errors="ignore"),
-                         "source": str(f.relative_to(p))})
+            try:
+                text = f.read_text(encoding="utf-8", errors="ignore")
+                if text.strip():
+                    docs.append({"text": text,
+                                 "source": str(f.relative_to(p))})
+            except Exception:
+                continue
     return docs
 
 

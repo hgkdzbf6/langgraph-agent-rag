@@ -58,7 +58,8 @@ class VectorStore:
             Path(index_path).parent.mkdir(parents=True, exist_ok=True)
             faiss.write_index(self.index, index_path)
         Path(meta_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(meta_path).write_text(json.dumps(self.meta, ensure_ascii=False))
+        Path(meta_path).write_text(json.dumps(self.meta, ensure_ascii=False),
+                                   encoding="utf-8")
 
     def load(self, index_path: str, meta_path: str) -> bool:
         if faiss is None:
@@ -67,7 +68,7 @@ class VectorStore:
         if not (ip.exists() and mp.exists()):
             return False
         self.index = faiss.read_index(str(ip))
-        self.meta = json.loads(mp.read_text())
+        self.meta = json.loads(mp.read_text(encoding="utf-8"))
         return True
 
     def __len__(self) -> int:

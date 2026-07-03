@@ -31,9 +31,10 @@ def main(question: str | None = None) -> None:
     cost = CostTracker(model=CONFIG.llm.model)
 
     # 1. 构建并装载 RAG 知识库
-    print("==== 构建 RAG 知识库 ====")
+    knowledge_dir = CONFIG.rag.knowledge_dir
+    print(f"==== 构建 RAG 知识库 ({knowledge_dir}) ====")
     rag = build_pipeline(CONFIG, tracer)
-    n = rag.ingest_dir("data/knowledge")
+    n = rag.ingest_dir(knowledge_dir)
     print(f"已索引 {n} 个 chunk")
     set_pipeline(rag)
     clear_cache()

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -70,17 +71,27 @@ class GLMEmbedder(Embedder):
                 todo.append((i, t))
 
         if todo and self._client is not None:
-            # 分批，避免单次请求过大
-            BATCH = 16
+            # 小批量 + 延时 + 重试，避免 WAF 拦截
+            BATCH = 4
+            MAX_RETRIES = 3
             for b in range(0, len(todo), BATCH):
                 batch = todo[b:b + BATCH]
-                resp = self._client.embeddings.create(
-                    model=self.cfg.model, input=[t for _, t in batch]
-                )
-                for (idx, txt), item in zip(batch, resp.data):
-                    vec = item.embedding
-                    results[idx] = vec
-                    self._cache[self._key(txt)] = vec
+                for attempt in range(MAX_RETRIES):
+                    try:
+                        resp = self._client.embeddings.create(
+                            model=self.cfg.model, input=[t for _, t in batch]
+                        )
+                        for (idx, txt), item in zip(batch, resp.data):
+                            vec = item.embedding
+                            results[idx] = vec
+                            self._cache[self._key(txt)] = vec
+                        break
+                    except Exception:
+                        if attempt < MAX_RETRIES - 1:
+                            time.sleep(1 * (attempt + 1))
+                        # 失败时回退 mock 向量，不阻断流程
+                if b + BATCH < len(todo):
+                    time.sleep(0.3)  # 批间延时
             self._save_cache()
 
         # 仍未拿到（无 client 或失败）→ 回退 mock 向量，保证不阻断

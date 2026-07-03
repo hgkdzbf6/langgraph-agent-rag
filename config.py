@@ -43,7 +43,8 @@ class LLMConfig:
 @dataclass
 class EmbedConfig:
     base_url: str = field(
-        default_factory=lambda: _env("ZCODE_BASE_URL")
+        default_factory=lambda: _env("EMBED_BASE_URL")
+        or _env("ZCODE_BASE_URL")
         or _env("ZAI_BUSINESS_BASE_URL")
         or "https://open.bigmodel.cn/api/paas/v4"
     )
@@ -70,12 +71,13 @@ class RerankConfig:
 
 @dataclass
 class RAGConfig:
-    chunk_size: int = field(default_factory=lambda: int(_env("CHUNK_SIZE", "512")))
-    chunk_overlap: int = field(default_factory=lambda: int(_env("CHUNK_OVERLAP", "64")))
+    chunk_size: int = field(default_factory=lambda: int(_env("CHUNK_SIZE", "1024")))
+    chunk_overlap: int = field(default_factory=lambda: int(_env("CHUNK_OVERLAP", "128")))
     retrieve_topk: int = field(default_factory=lambda: int(_env("RETRIEVE_TOPK", "20")))
     rerank_topn: int = field(default_factory=lambda: int(_env("RERANK_TOPN", "5")))
     index_path: str = "data/faiss.index"
     meta_path: str = "data/faiss.meta.json"
+    knowledge_dir: str = field(default_factory=lambda: _env("KNOWLEDGE_DIR", "data/knowledge"))
 
 
 @dataclass
