@@ -11,10 +11,12 @@ from openai import OpenAI
 from config import LLMConfig
 from observability import Tracer, CostTracker
 from .base import LLMClient, ChatResult, ToolCall
+from .cache import LLMCache
 
 
 class GLMClient(LLMClient):
-    def __init__(self, cfg: LLMConfig, tracer: Tracer, cost: CostTracker) -> None:
+    def __init__(self, cfg: LLMConfig, tracer: Tracer, cost: CostTracker,
+                 cache: LLMCache | None = None) -> None:
         if not cfg.configured:
             raise RuntimeError(
                 "GLMClient 未配置：请设置 ZCODE_BASE_URL / ZHIPU_API_KEY（见 .env.example）"
@@ -22,10 +24,20 @@ class GLMClient(LLMClient):
         self.cfg = cfg
         self.tracer = tracer
         self.cost = cost
+        self.cache = cache
         self.client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
 
     def _call(self, messages: list[dict], tools: list[dict] | None,
               temperature: float | None, max_tokens: int | None, scope: str) -> ChatResult:
+        # 检查缓存
+        if self.cache is not None:
+            cached = self.cache.get(self.cfg.model, messages, tools)
+            if cached is not None:
+                with self.tracer.span(f"llm:{scope}", model=self.cfg.model,
+                                      cached=True, n_msgs=len(messages)):
+                    pass
+                return cached
+
         kwargs: dict[str, Any] = {
             "model": self.cfg.model,
             "messages": messages,
@@ -62,8 +74,14 @@ class GLMClient(LLMClient):
             }
             self.cost.add(usage, scope=scope, model=self.cfg.model)
 
-        return ChatResult(content=choice.content or "", tool_calls=tool_calls,
-                          usage=usage, raw=resp)
+        result = ChatResult(content=choice.content or "", tool_calls=tool_calls,
+                            usage=usage, raw=resp)
+
+        # 写入缓存（仅缓存无 tool_calls 的纯文本响应，避免缓存工具调用导致状态不一致）
+        if self.cache is not None and not tool_calls:
+            self.cache.put(self.cfg.model, messages, result, tools)
+
+        return result
 
     def chat(self, messages, *, temperature=None, max_tokens=None, scope="llm") -> ChatResult:
         return self._call(messages, None, temperature, max_tokens, scope)

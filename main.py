@@ -14,8 +14,9 @@ import sys
 from config import CONFIG
 from observability import Tracer, CostTracker
 from core.llm import GLMClient
+from core.llm.cache import LLMCache
 from core.tools import builtin  # noqa: F401  触发工具注册
-from core.tools.builtin.retrieval import set_pipeline
+from core.tools.builtin.retrieval import set_pipeline, clear_cache
 from core.graph import build_graph
 from rag import build_pipeline
 
@@ -35,9 +36,11 @@ def main(question: str | None = None) -> None:
     n = rag.ingest_dir("data/knowledge")
     print(f"已索引 {n} 个 chunk")
     set_pipeline(rag)
+    clear_cache()
 
     # 2. 构建 LLM 客户端与 Agent 图
-    llm = GLMClient(CONFIG.llm, tracer, cost)
+    cache = LLMCache() if CONFIG.enable_llm_cache else None
+    llm = GLMClient(CONFIG.llm, tracer, cost, cache=cache)
     graph = build_graph(llm, CONFIG, tracer)
 
     q = question or "请结合知识库说明：这个自研 Agent 框架具备哪些核心能力，RAG 如何优化召回质量，以及它相对 LangChain 的取舍是什么？"
@@ -66,6 +69,46 @@ def main(question: str | None = None) -> None:
     print("\n" + cost.report())
 
 
+def run_eval():
+    """运行评测套件。"""
+    from eval import RAGEvaluator, ReflectionEvaluator, E2EEvaluator
+
+    if not CONFIG.llm.configured:
+        print("[ERROR] 评测需要 API Key。请在 .env 设置 ZHIPU_API_KEY / ZCODE_BASE_URL。")
+        sys.exit(1)
+
+    tracer = Tracer()
+    cost = CostTracker(model=CONFIG.llm.model)
+    rag = build_pipeline(CONFIG, tracer)
+    n = rag.ingest_dir("data/knowledge")
+    print(f"已索引 {n} 个 chunk")
+
+    print("\n" + "=" * 50)
+    print("1. RAG 召回质量评测")
+    print("=" * 50)
+    rag_eval = RAGEvaluator(rag)
+    print(rag_eval.report())
+
+    print("\n" + "=" * 50)
+    print("2. Reflection 收益评测")
+    print("=" * 50)
+    llm = GLMClient(CONFIG.llm, tracer, cost)
+    ref_eval = ReflectionEvaluator(llm)
+    print(ref_eval.report())
+
+    print("\n" + "=" * 50)
+    print("3. 端到端评测")
+    print("=" * 50)
+    def llm_factory(cfg, tr, ct):
+        from core.llm.glm import GLMClient as GLMC
+        return GLMC(cfg.llm, tr, ct)
+    e2e_eval = E2EEvaluator(llm_factory)
+    print(e2e_eval.report())
+
+
 if __name__ == "__main__":
-    q = sys.argv[1] if len(sys.argv) > 1 else None
-    main(q)
+    if "--eval" in sys.argv:
+        run_eval()
+    else:
+        q = sys.argv[1] if len(sys.argv) > 1 else None
+        main(q)

@@ -28,6 +28,7 @@ from observability import Tracer
 from core.llm import LLMClient
 from .state import AgentState
 from .planner import make_planner
+from .complexity import make_complexity_check, make_simple_subtask
 from .react import make_react_reason, make_react_observe
 from .executor import make_executor
 from .reflector import make_reflector
@@ -52,12 +53,25 @@ def make_advance(cfg: Config):
     return node
 
 
+def make_direct_answer(tracer: Tracer):
+    """快速路径：单子任务直接取结果作为最终答案，跳过 Aggregator LLM 调用。"""
+    def node(state: AgentState) -> AgentState:
+        subs = state["subtasks"]
+        result = subs[0]["result"] if subs else ""
+        trace = state.get("trace", [])
+        trace.append("[direct_answer] 单子任务直接返回结果")
+        return {"final_answer": result, "done": True, "trace": trace}
+    return node
+
+
 def make_aggregator(llm: LLMClient, tracer: Tracer):
     def node(state: AgentState) -> AgentState:
         subs = state["subtasks"]
         with tracer.span("aggregator", n_subtasks=len(subs)):
+            # 截断每个子任务结果，防止总输入过长
+            MAX_RESULT_LEN = 1500
             summary = "\n\n".join(
-                f"### 子任务{i+1}: {s['goal']}\n结果: {s['result']}"
+                f"### 子任务{i+1}: {s['goal']}\n结果: {s['result'][:MAX_RESULT_LEN]}"
                 for i, s in enumerate(subs)
             )
             res = llm.chat(
@@ -84,8 +98,26 @@ def build_graph(llm: LLMClient, cfg: Config, tracer: Tracer):
     g.add_node("reflector", make_reflector(llm, cfg, tracer))
     g.add_node("advance", make_advance(cfg))
     g.add_node("aggregator", make_aggregator(llm, tracer))
+    g.add_node("direct_answer", make_direct_answer(tracer))
 
-    g.add_edge(START, "planner")
+    if cfg.enable_complexity_check:
+        g.add_node("complexity_check", make_complexity_check(llm, cfg, tracer))
+        g.add_node("simple_subtask", make_simple_subtask())
+        g.add_edge(START, "complexity_check")
+
+        def after_complexity(state: AgentState) -> str:
+            if state.get("complexity") == "simple":
+                return "simple_subtask"
+            return "planner"
+
+        g.add_conditional_edges(
+            "complexity_check", after_complexity,
+            {"simple_subtask": "simple_subtask", "planner": "planner"},
+        )
+        g.add_edge("simple_subtask", "react_reason")
+    else:
+        g.add_edge(START, "planner")
+
     g.add_edge("planner", "react_reason")
     g.add_edge("react_reason", "tool_executor")
     g.add_edge("tool_executor", "react_observe")
@@ -116,16 +148,21 @@ def build_graph(llm: LLMClient, cfg: Config, tracer: Tracer):
         {"react_reason": "react_reason", "advance": "advance"},
     )
 
-    # advance 之后：还有子任务 → react_reason；否则 → aggregator
+    # advance 之后：还有子任务 → react_reason；简单单任务 → direct_answer；否则 → aggregator
     def after_advance(state: AgentState) -> str:
         idx = state.get("current_index", 0)
         if idx < len(state.get("subtasks", [])):
             return "react_reason"
+        # 简单问题 + 单子任务 → 跳过 Aggregator，直接返回
+        if (state.get("complexity") == "simple"
+                and len(state.get("subtasks", [])) == 1):
+            return "direct_answer"
         return "aggregator"
 
     g.add_conditional_edges(
         "advance", after_advance,
-        {"react_reason": "react_reason", "aggregator": "aggregator"},
+        {"react_reason": "react_reason", "aggregator": "aggregator",
+         "direct_answer": "direct_answer"},
     )
 
     g.add_edge("aggregator", END)

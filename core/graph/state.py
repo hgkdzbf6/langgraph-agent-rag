@@ -25,3 +25,4 @@ class AgentState(TypedDict, total=False):
     final_answer: str               # 最终聚合答案
     trace: list[str]                # 高层轨迹（人类可读）
     done: bool
+    complexity: str                 # "simple" | "complex"，由 complexity_check 节点设置

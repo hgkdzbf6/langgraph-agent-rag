@@ -12,16 +12,19 @@ from observability import Tracer
 from core.llm import LLMClient
 from .state import AgentState, SubTask
 
-PLAN_PROMPT = """你是一个任务规划器。请把用户的复杂问题拆解为 {n} 个以内的、可依次执行的子任务，
-每个子任务应是一个明确的、可被工具辅助解决的小目标。
+PLAN_PROMPT = """你是一个任务规划器。请把用户问题拆解为 **尽量少** 的子任务（通常 1-3 个足够）。
+
+原则：
+- 能 1 个子任务完成的不要拆 2 个
+- 只在确实需要不同信息源/不同分析维度时才拆分
+- 每个子任务应是独立的、可一次检索+推理完成的小目标
 
 仅输出 JSON 数组，不要任何解释文字，格式：
 [
-  {{ "goal": "子任务1的描述" }},
-  {{ "goal": "子任务2的描述" }}
+  {{ "goal": "子任务描述" }}
 ]
 
-用户问题：{question}
+最多 {n} 个子任务。用户问题：{question}
 """
 
 

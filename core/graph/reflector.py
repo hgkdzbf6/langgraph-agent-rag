@@ -45,6 +45,10 @@ def make_reflector(llm: LLMClient, cfg: Config, tracer: Tracer):
         sub = state["subtasks"][idx]
         if sub["status"] != "done":
             return {"subtasks": state["subtasks"]}  # 未完成，不审查
+        if not cfg.enable_reflection:
+            trace = state.get("trace", [])
+            trace.append(f"[reflector#{idx}] Reflection 已禁用，直接接受")
+            return {"subtasks": state["subtasks"], "trace": trace}
         if sub["reflection_count"] >= cfg.max_reflections:
             return {"subtasks": state["subtasks"]}  # 达到上限，接受
 

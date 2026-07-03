@@ -85,9 +85,17 @@ class Config:
     rerank: RerankConfig = field(default_factory=RerankConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
     # Agent 行为
-    max_subtasks: int = 6
-    max_react_steps: int = 5        # 单个子任务内 ReAct 最大轮次
+    max_subtasks: int = 3
+    max_react_steps: int = 3        # 单个子任务内 ReAct 最大轮次
     max_reflections: int = 2        # 单个步骤最多纠错次数
+    enable_complexity_check: bool = True   # 启用复杂度前置判断
+    enable_reflection: bool = True        # 启用 Reflection 自我纠错
+    enable_llm_cache: bool = False        # 启用 LLM 响应缓存
+    sandbox_mode: str = "local"           # "local" | "docker"
+    docker_image: str = "python:3.11-slim"
+    docker_timeout: int = 10
+    docker_memory: str = "128m"
+    docker_cpus: float = 0.5
 
 
 CONFIG = Config()

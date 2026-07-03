@@ -34,12 +34,35 @@ def _init_messages(state: AgentState, sub) -> list[dict]:
     return sub["messages"]
 
 
+def _trim_messages(msgs: list[dict], max_tool_results: int = 3) -> list[dict]:
+    """截断过长的 tool 结果，保留最近 N 轮的 tool 输出，避免 token 爆炸。
+
+    策略：保留 system + 最近 2 条 user/assistant + 最近 max_tool_results 个 tool 结果，
+    丢弃早期的 tool 结果（它们的内容已被 assistant 总结过）。
+    """
+    if len(msgs) <= 4:
+        return msgs
+
+    system = [m for m in msgs if m.get("role") == "system"]
+    non_system = [m for m in msgs if m.get("role") != "system"]
+
+    # 保留最后 N 条消息（含 assistant 对早期 tool 结果的总结）
+    keep = max_tool_results * 2 + 2  # tool + assistant 配对
+    if len(non_system) > keep:
+        non_system = non_system[-keep:]
+
+    return system + non_system
+
+
 def make_react_reason(llm: LLMClient, cfg: Config, tracer: Tracer):
     def node(state: AgentState) -> AgentState:
         idx = state["current_index"]
         subs = state["subtasks"]
         sub = subs[idx]
         msgs = _init_messages(state, sub)
+        # 截断过长的 tool 结果，防止 token 爆炸
+        msgs = _trim_messages(msgs, max_tool_results=2)
+        sub["messages"] = msgs
         with tracer.span("react_reason", subtask=idx, step=sub["react_steps"]):
             res = llm.chat_with_tools(msgs, as_functions(), scope=f"react#{idx}")
         # 追加 assistant 消息
