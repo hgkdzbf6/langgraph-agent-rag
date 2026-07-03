@@ -1,32 +1,242 @@
 [
   {
+    "id": 1,
     "query": "1+1等于几？",
     "type": "simple",
     "expected_answer": "2",
-    "expected_chunks": []
+    "relevant_chunks": [],
+    "category": "math"
   },
   {
-    "query": "Python 中 list 和 tuple 的区别是什么？",
+    "id": 2,
+    "query": "什么是 ReAct 推理？",
     "type": "simple",
-    "expected_answer": "list 是可变的，tuple 是不可变的",
-    "expected_chunks": ["langchain_compare"]
+    "expected_answer": "Agent 在每一步先思考再决定动作，观察结果后进入下一轮循环，通过 LLM 的 Function Calling 驱动工具调用",
+    "relevant_chunks": ["agent_framework.md#0"],
+    "category": "core_concept"
   },
   {
+    "id": 3,
+    "query": "Reflection 自我纠错机制是如何工作的？",
+    "type": "simple",
+    "expected_answer": "子任务产出结果后由 Reflector 节点复核，若不充分或有误则注入反馈回到推理节点重做，最多重试 max_reflections 次",
+    "relevant_chunks": ["agent_framework.md#0"],
+    "category": "core_concept"
+  },
+  {
+    "id": 4,
+    "query": "这个 Agent 框架如何进行长程任务规划？",
+    "type": "complex",
+    "expected_answer": "Planner 节点将复杂问题拆解为有序子任务列表，Agent 逐个完成后由 Aggregator 汇总",
+    "relevant_chunks": ["agent_framework.md#0"],
+    "category": "core_concept"
+  },
+  {
+    "id": 5,
+    "query": "多工具并发编排是怎么实现的？",
+    "type": "simple",
+    "expected_answer": "同一轮 ReAct 中 LLM 产出多个 tool_calls 时，tool_executor 用线程池并发执行",
+    "relevant_chunks": ["agent_framework.md#1"],
+    "category": "core_concept"
+  },
+  {
+    "id": 6,
+    "query": "MCP 风格工具注册的结构是什么？",
+    "type": "simple",
+    "expected_answer": "工具定义为 {name, description, input_schema, handler}，用 @register_tool 装饰器注册",
+    "relevant_chunks": ["agent_framework.md#1"],
+    "category": "core_concept"
+  },
+  {
+    "id": 7,
     "query": "这个 Agent 框架有哪些核心能力？",
     "type": "complex",
-    "expected_answer": "ReAct 推理、Reflection 自我纠错、长程任务规划、多工具并发、RAG 知识库、全链路可观测性",
-    "expected_chunks": ["agent_framework"]
+    "expected_answer": "ReAct 推理、Reflection 自我纠错、长程任务规划、多工具并发、MCP 风格工具注册",
+    "relevant_chunks": ["agent_framework.md#0", "agent_framework.md#1"],
+    "category": "overview"
   },
   {
-    "query": "RAG 流水线的四个步骤是什么？",
+    "id": 8,
+    "query": "RAG 流水线分哪几个步骤？",
     "type": "complex",
-    "expected_answer": "切分(chunking)、Embedding、向量检索(FAISS)、重排(rerank)",
-    "expected_chunks": ["rag"]
+    "expected_answer": "文档切分、Embedding、向量检索、重排序四步",
+    "relevant_chunks": ["rag.md#0", "rag.md#1"],
+    "category": "rag"
   },
   {
-    "query": "这个框架和 LangChain 相比有什么优势？",
+    "id": 9,
+    "query": "RAG 中文档切分采用什么策略？",
+    "type": "simple",
+    "expected_answer": "递归字符切分，按段落→换行→句号→空格层级递归，加 chunk_overlap 重叠",
+    "relevant_chunks": ["rag.md#0"],
+    "category": "rag"
+  },
+  {
+    "id": 10,
+    "query": "RAG 的 Embedding 环节是怎么做的？",
+    "type": "simple",
+    "expected_answer": "调用智谱 embedding-3 接口生成稠密向量，按文本 hash 本地缓存避免重复计费",
+    "relevant_chunks": ["rag.md#0"],
+    "category": "rag"
+  },
+  {
+    "id": 11,
+    "query": "FAISS 在 RAG 中的作用是什么？",
+    "type": "simple",
+    "expected_answer": "使用 FAISS IndexFlatIP 做向量检索，L2 归一化后内积等于 cosine 相似度，召回 Top-K 候选",
+    "relevant_chunks": ["rag.md#0"],
+    "category": "rag"
+  },
+  {
+    "id": 12,
+    "query": "RAG 重排序有哪些策略？",
+    "type": "simple",
+    "expected_answer": "优先调用 rerank API，无 API 时回退 MMR（最大边际相关性），兼顾相关性与多样性",
+    "relevant_chunks": ["rag.md#1"],
+    "category": "rag"
+  },
+  {
+    "id": 13,
+    "query": "这个框架如何降低延迟？",
     "type": "complex",
-    "expected_answer": "更轻量、可控性强、内建可观测性、无 torch 依赖",
-    "expected_chunks": ["langchain_compare", "agent_framework"]
+    "expected_answer": "embedding 缓存 + 并发工具调用降低端到端时延",
+    "relevant_chunks": ["rag.md#1", "agent_framework.md#1"],
+    "category": "optimization"
+  },
+  {
+    "id": 14,
+    "query": "这个框架如何做成本控制？",
+    "type": "simple",
+    "expected_answer": "token 统计按节点/工具归因，便于定位成本热点",
+    "relevant_chunks": ["rag.md#1"],
+    "category": "optimization"
+  },
+  {
+    "id": 15,
+    "query": "这个框架的可观测性是怎么实现的？",
+    "type": "simple",
+    "expected_answer": "RAG 检索/重排均纳入 Tracer span，输出链路树",
+    "relevant_chunks": ["rag.md#1"],
+    "category": "observability"
+  },
+  {
+    "id": 16,
+    "query": "为什么选择自研而不是用 LangChain？",
+    "type": "complex",
+    "expected_answer": "流程可控、工具抽象轻、LLM 解耦、内建可观测、轻依赖不引入 torch",
+    "relevant_chunks": ["langchain_compare.md#0"],
+    "category": "comparison"
+  },
+  {
+    "id": 17,
+    "query": "自研框架相比 LangChain 在工具抽象上有什么优势？",
+    "type": "simple",
+    "expected_answer": "MCP 风格 Tool 极简注册即用，LangChain 的 Tool/StructuredTool/BaseTool 层级更重",
+    "relevant_chunks": ["langchain_compare.md#0"],
+    "category": "comparison"
+  },
+  {
+    "id": 18,
+    "query": "自研框架的 LLM 解耦是怎么做的？",
+    "type": "simple",
+    "expected_answer": "单一 LLMClient 抽象，换 Provider 只改一个类，不牵连业务节点",
+    "relevant_chunks": ["langchain_compare.md#0"],
+    "category": "comparison"
+  },
+  {
+    "id": 19,
+    "query": "自研框架的依赖有哪些？",
+    "type": "simple",
+    "expected_answer": "核心只依赖 langgraph + openai + faiss + numpy，不引入 torch",
+    "relevant_chunks": ["langchain_compare.md#1"],
+    "category": "comparison"
+  },
+  {
+    "id": 20,
+    "query": "自研框架有什么不足？",
+    "type": "simple",
+    "expected_answer": "生态组件少，成熟度不如 LangChain 社区沉淀的数百个集成",
+    "relevant_chunks": ["langchain_compare.md#1"],
+    "category": "comparison"
+  },
+  {
+    "id": 21,
+    "query": "这个框架适合什么场景？",
+    "type": "complex",
+    "expected_answer": "对可控性、可观测性、轻量化有要求的内部平台",
+    "relevant_chunks": ["langchain_compare.md#1"],
+    "category": "comparison"
+  },
+  {
+    "id": 22,
+    "query": "这个框架的总体定位是什么？",
+    "type": "complex",
+    "expected_answer": "为可控性、可观测性、轻依赖而自研，用 LangGraph 做编排而非 LangChain Agent",
+    "relevant_chunks": ["langchain_compare.md#1", "agent_framework.md#0"],
+    "category": "overview"
+  },
+  {
+    "id": 23,
+    "query": "LangGraph 在这个框架中扮演什么角色？",
+    "type": "simple",
+    "expected_answer": "用 LangGraph 做编排，显式声明节点与条件边，ReAct 循环、Reflection 回退、子任务推进都在图拓扑里",
+    "relevant_chunks": ["langchain_compare.md#0", "agent_framework.md#0"],
+    "category": "core_concept"
+  },
+  {
+    "id": 24,
+    "query": "RAG 中如何避免结果同质化？",
+    "type": "simple",
+    "expected_answer": "重排序阶段使用 MMR（最大边际相关性），兼顾相关性与多样性",
+    "relevant_chunks": ["rag.md#1"],
+    "category": "rag"
+  },
+  {
+    "id": 25,
+    "query": "这个框架怎么处理工具调用失败？",
+    "type": "simple",
+    "expected_answer": "ReAct 推理中若工具失败，可换思路或重试",
+    "relevant_chunks": ["agent_framework.md#0"],
+    "category": "core_concept"
+  },
+  {
+    "id": 26,
+    "query": "Embedding 缓存有什么作用？",
+    "type": "simple",
+    "expected_answer": "按文本 hash 本地缓存，避免重复调用 embedding API 产生额外计费",
+    "relevant_chunks": ["rag.md#0"],
+    "category": "rag"
+  },
+  {
+    "id": 27,
+    "query": "这个框架和 LangChain 在可观测性上有什么区别？",
+    "type": "complex",
+    "expected_answer": "自研框架内建 Tracer span + CostTracker token 成本归因零额外依赖；LangChain 强依赖 LangSmith / callbacks 生态",
+    "relevant_chunks": ["langchain_compare.md#0"],
+    "category": "comparison"
+  },
+  {
+    "id": 28,
+    "query": "RAG 中 Top-K 和 Top-N 有什么区别？",
+    "type": "simple",
+    "expected_answer": "Top-K 是向量检索召回的候选数（默认 20），Top-N 是重排后取的最终结果数（默认 5）",
+    "relevant_chunks": ["rag.md#0", "rag.md#1"],
+    "category": "rag"
+  },
+  {
+    "id": 29,
+    "query": "chunk_overlap 的作用是什么？",
+    "type": "simple",
+    "expected_answer": "保留上下文连续性，避免切分点丢失跨 chunk 的语义关联",
+    "relevant_chunks": ["rag.md#0"],
+    "category": "rag"
+  },
+  {
+    "id": 30,
+    "query": "总结这个 Agent 框架的全部能力",
+    "type": "complex",
+    "expected_answer": "ReAct推理、Reflection纠错、长程规划、多工具并发、MCP工具注册、RAG知识库、可观测性、LangGraph编排",
+    "relevant_chunks": ["agent_framework.md#0", "agent_framework.md#1", "rag.md#0", "rag.md#1", "langchain_compare.md#0", "langchain_compare.md#1"],
+    "category": "overview"
   }
 ]
