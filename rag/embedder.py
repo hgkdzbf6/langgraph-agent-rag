@@ -109,28 +109,38 @@ class GLMEmbedder(Embedder):
                 todo.append((i, t))
 
         if todo and self._client is not None:
-            # 小批量 + 延时 + 重试，避免 WAF 拦截
-            BATCH = 4
+            # 大批量 embedding（API 单次支持上百条），失败自动重试 + 降级
+            BATCH = 64
             MAX_RETRIES = 3
-            for b in range(0, len(todo), BATCH):
-                batch = todo[b:b + BATCH]
+            import concurrent.futures as _cf
+            batches = [todo[b:b + BATCH] for b in range(0, len(todo), BATCH)]
+
+            def _embed_batch(batch):
+                """对单个批次调用 API，带重试。返回 [(idx, txt, vec), ...]。"""
                 for attempt in range(MAX_RETRIES):
                     try:
                         resp = self._client.embeddings.create(
                             model=self.cfg.model, input=[t for _, t in batch]
                         )
-                        for (idx, txt), item in zip(batch, resp.data):
-                            vec = np.asarray(item.embedding, dtype=np.float32)
-                            results[idx] = vec
-                            self._cache[self._key(txt)] = vec
-                            self._dirty = True
-                        break
-                    except Exception:
+                        return [(idx, txt, np.asarray(item.embedding, dtype=np.float32))
+                                for (idx, txt), item in zip(batch, resp.data)]
+                    except Exception as e:
                         if attempt < MAX_RETRIES - 1:
-                            time.sleep(1 * (attempt + 1))
-                        # 失败时回退 mock 向量，不阻断流程
-                if b + BATCH < len(todo):
-                    time.sleep(0.3)  # 批间延时
+                            time.sleep(0.5 * (attempt + 1))
+                        else:
+                            return [("__error__", str(e), None)]  # 整批失败
+                return []
+
+            # 并发请求多个批次（embedding API 通常允许并发）
+            n_workers = min(8, len(batches))
+            with _cf.ThreadPoolExecutor(max_workers=n_workers) as ex:
+                for batch_results in ex.map(_embed_batch, batches):
+                    for idx, txt, vec in batch_results:
+                        if idx == "__error__":
+                            continue  # 失败的 chunk 留给后面的 mock 兜底
+                        results[idx] = vec
+                        self._cache[self._key(txt)] = vec
+                        self._dirty = True
             self._save_cache()
 
         # 仍未拿到（无 client 或失败）→ 回退 mock 向量，保证不阻断
