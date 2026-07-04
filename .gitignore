@@ -6,3 +6,5 @@ __pycache__/
 .pytest_cache/
 data/faiss.*
 data/faiss.meta.json
+/data/knowledge
+data/_example_knowledge/

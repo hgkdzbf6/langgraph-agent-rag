@@ -23,7 +23,7 @@ _SKIP_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp",
 
 
 def _load_docs_from_dir(dir_: str) -> list[dict[str, str]]:
-    """递归读取目录下 .txt/.md 文件作为文档，跳过隐藏目录和非文本文件。"""
+    """递归读取目录下 .txt/.md 文件作为文档。"""
     docs: list[dict[str, str]] = []
     p = Path(dir_)
     if not p.exists():
@@ -46,6 +46,11 @@ def _load_docs_from_dir(dir_: str) -> list[dict[str, str]]:
     return docs
 
 
+def _is_obsidian_vault(dir_: str) -> bool:
+    """检测是否为 Obsidian 仓库：含 .obsidian 配置目录。"""
+    return (Path(dir_) / ".obsidian").is_dir()
+
+
 class RAGPipeline:
     def __init__(self, embedder: Embedder, reranker: Reranker, rag_cfg: RAGConfig,
                  tracer: Tracer | None = None) -> None:
@@ -63,7 +68,25 @@ class RAGPipeline:
             return len(chunks)
 
     def ingest_dir(self, dir_: str) -> int:
+        """通用目录索引：自动识别 Obsidian 仓库。
+
+        若检测到 Obsidian 特征（.obsidian 目录或大量 .md），走 Obsidian 专用
+        清洗 + 中文结构化切分；否则回退到通用加载。
+        """
+        if _is_obsidian_vault(dir_):
+            return self.ingest_obsidian(dir_)
         return self.ingest(_load_docs_from_dir(dir_))
+
+    def ingest_obsidian(self, dir_: str) -> int:
+        """Obsidian 仓库索引：清洗 + 中文结构化切分。"""
+        from .obsidian_loader import load_obsidian_notes
+        from .cn_chunking import chunk_notes
+        with (self.tracer.span("rag:ingest_obsidian", dir=dir_) if self.tracer else _noop_ctx()):
+            notes = load_obsidian_notes(dir_)
+            chunks = chunk_notes(notes, self.cfg.chunk_size, self.cfg.chunk_overlap)
+            self.store.build(chunks)
+            self.store.save(self.cfg.index_path, self.cfg.meta_path)
+            return len(chunks)
 
     def query(self, query: str, topn: int | None = None) -> list[str]:
         """检索 → 重排 → 返回片段文本列表。"""
@@ -79,11 +102,23 @@ class RAGPipeline:
             return []
         cands = [{"chunk": c, "score": s} for c, s in hits]
         reranked = self.reranker.rerank(query, cands, topn)
-        return [
-            f"[{c['chunk'].get('source','?')}#{c['chunk'].get('index',0)}] "
-            f"(score={c['score']:.3f}) {c['chunk']['text']}"
-            for c in reranked
-        ]
+        out: list[str] = []
+        for c in reranked:
+            ck = c["chunk"]
+            source = ck.get("source", "?")
+            title = ck.get("title", "")
+            heading = ck.get("heading_path", "")
+            idx = ck.get("index", 0)
+            tags = ck.get("tags", [])
+            header = f"[{source}#{idx}]"
+            if title:
+                header += f" 《{title}》"
+            if heading and heading != title:
+                header += f" § {heading}"
+            if tags:
+                header += f" {tags}"
+            out.append(f"{header} (score={c['score']:.3f})\n{ck['text']}")
+        return out
 
 
 class _noop_ctx:

@@ -44,6 +44,30 @@ cp .env.example .env
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | RAG 切分参数 |
 | `RETRIEVE_TOPK` / `RERANK_TOPN` | 召回/重排数量 |
 
+## 接入自己的知识库（Obsidian 笔记库）
+
+`data/knowledge` 默认软链到 Obsidian 仓库（`/Users/zbf/worknote`，477 篇工作笔记）。
+pipeline 自动识别 Obsidian 格式，做专用清洗 + 中文结构化切分：
+
+```
+Obsidian 笔记 → obsidian_loader（去 frontmatter/图片嵌入/解析双链）
+             → cn_chunking（按标题分段 + 中文标点递归切分 + 代码块保护）
+             → embedding → FAISS → 重排
+```
+
+切换知识库：删除软链，指向你自己的目录即可
+```bash
+rm data/knowledge
+ln -s /path/to/your/vault data/knowledge
+.venv/bin/python main.py   # 自动重建索引
+```
+
+清洗能力（见 `rag/obsidian_loader.py`）：
+- 去除 YAML frontmatter，但先抽取 tags
+- 去除图片/附件嵌入 `![[x.png]]` `![](path)`
+- wiki 双链 `[[note]]` → 保留笔记名作为可检索文本，纯附件链接丢弃
+- 中文切分按 `。！？；，` 层级递归，代码块 ```` ``` ```` 整段保护不切割
+
 ## 示例输出
 运行后可看到：最终答案、任务轨迹、子任务统计、链路追踪树、token 成本报告。
 
