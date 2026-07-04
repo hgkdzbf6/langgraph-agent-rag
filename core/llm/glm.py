@@ -51,7 +51,19 @@ class GLMClient(LLMClient):
             try:
                 resp = self.client.chat.completions.create(**kwargs)
             except Exception as e:
-                # tracer 的 with 退出会自动打 error span
+                # 报错时 dump messages 到文件，便于排查 1214 等参数错误
+                import json as _json, time as _time
+                dump = {"scope": scope, "error": str(e)[:500],
+                        "kwargs_keys": list(kwargs.keys()),
+                        "messages": messages,
+                        "tools": tools}
+                try:
+                    from pathlib import Path as _P
+                    _P("data/_llm_error_dump.json").write_text(
+                        _json.dumps(dump, ensure_ascii=False, indent=2, default=str),
+                        encoding="utf-8")
+                except Exception:
+                    pass
                 raise
 
         choice = resp.choices[0].message

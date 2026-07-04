@@ -94,7 +94,7 @@ def build_graph(llm: LLMClient, cfg: Config, tracer: Tracer):
     g.add_node("planner", make_planner(llm, cfg, tracer))
     g.add_node("react_reason", make_react_reason(llm, cfg, tracer))
     g.add_node("tool_executor", make_executor(tracer))
-    g.add_node("react_observe", make_react_observe(cfg, tracer))
+    g.add_node("react_observe", make_react_observe(cfg, tracer, llm))
     g.add_node("reflector", make_reflector(llm, cfg, tracer))
     g.add_node("advance", make_advance(cfg))
     g.add_node("aggregator", make_aggregator(llm, tracer))

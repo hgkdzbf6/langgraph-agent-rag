@@ -8,3 +8,4 @@ data/faiss.*
 data/faiss.meta.json
 /data/knowledge
 data/_example_knowledge/
+data/_llm_error_dump.json
