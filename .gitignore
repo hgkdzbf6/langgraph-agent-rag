@@ -9,3 +9,4 @@ data/faiss.meta.json
 /data/knowledge
 data/_example_knowledge/
 data/_llm_error_dump.json
+data/faiss.index.fingerprint

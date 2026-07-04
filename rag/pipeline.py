@@ -59,34 +59,66 @@ class RAGPipeline:
         self.store = VectorStore(embedder)
         self.reranker = reranker
 
-    def ingest(self, docs: list[dict[str, str]]) -> int:
-        """docs: [{"text":..., "source":...}, ...]；返回 chunk 数。"""
+    def ingest(self, docs: list[dict[str, str]], *, force: bool = False) -> int:
+        """docs: [{"text":..., "source":...}, ...]；返回 chunk 数。
+
+        若已有索引且内容指纹匹配，直接复用（跳过 embedding/重建）；
+        force=True 强制重建。
+        """
         with (self.tracer.span("rag:ingest", n_docs=len(docs)) if self.tracer else _noop_ctx()):
             chunks = chunk_documents(docs, self.cfg.chunk_size, self.cfg.chunk_overlap)
-            self.store.build(chunks)
-            self.store.save(self.cfg.index_path, self.cfg.meta_path)
-            return len(chunks)
+            return self._build_or_load(chunks, force=force)
 
-    def ingest_dir(self, dir_: str) -> int:
+    def ingest_dir(self, dir_: str, *, force: bool = False) -> int:
         """通用目录索引：自动识别 Obsidian 仓库。
 
         若检测到 Obsidian 特征（.obsidian 目录或大量 .md），走 Obsidian 专用
         清洗 + 中文结构化切分；否则回退到通用加载。
         """
         if _is_obsidian_vault(dir_):
-            return self.ingest_obsidian(dir_)
-        return self.ingest(_load_docs_from_dir(dir_))
+            return self.ingest_obsidian(dir_, force=force)
+        return self.ingest(_load_docs_from_dir(dir_), force=force)
 
-    def ingest_obsidian(self, dir_: str) -> int:
-        """Obsidian 仓库索引：清洗 + 中文结构化切分。"""
+    def ingest_obsidian(self, dir_: str, *, force: bool = False) -> int:
+        """Obsidian 仓库索引：清洗 + 中文结构化切分。
+
+        内容未变时直接复用已落盘的 FAISS 索引，跳过 embedding 与重建。
+        """
         from .obsidian_loader import load_obsidian_notes
         from .cn_chunking import chunk_notes
         with (self.tracer.span("rag:ingest_obsidian", dir=dir_) if self.tracer else _noop_ctx()):
             notes = load_obsidian_notes(dir_)
             chunks = chunk_notes(notes, self.cfg.chunk_size, self.cfg.chunk_overlap)
-            self.store.build(chunks)
-            self.store.save(self.cfg.index_path, self.cfg.meta_path)
-            return len(chunks)
+            return self._build_or_load(chunks, source=dir_, force=force)
+
+    def _build_or_load(self, chunks: list[dict], *, source: str = "",
+                       force: bool = False) -> int:
+        """根据内容指纹决定复用索引还是重建。
+
+        指纹 = chunk 文本的 SHA256，与索引一起落盘。下次启动若指纹一致且
+        索引文件存在，直接 load，跳过 embedding（秒级启动）。
+        """
+        import hashlib
+        import json
+        from pathlib import Path
+
+        fp_text = json.dumps([c["text"] for c in chunks], ensure_ascii=False)
+        fingerprint = hashlib.sha256(fp_text.encode()).hexdigest()[:16]
+        fp_path = Path(self.cfg.index_path + ".fingerprint")
+
+        # 尝试复用：索引存在 + 指纹匹配 + 非强制
+        if not force and Path(self.cfg.index_path).exists():
+            cached_fp = fp_path.read_text().strip() if fp_path.exists() else ""
+            if cached_fp == fingerprint and self.store.load(self.cfg.index_path,
+                                                            self.cfg.meta_path):
+                # 指纹匹配 + 索引成功加载，跳过 embedding 与重建
+                return len(self.store.meta)
+
+        # 重建
+        self.store.build(chunks)
+        self.store.save(self.cfg.index_path, self.cfg.meta_path)
+        fp_path.write_text(fingerprint)
+        return len(chunks)
 
     def query(self, query: str, topn: int | None = None) -> list[str]:
         """检索 → 重排 → 返回片段文本列表。"""

@@ -30,12 +30,19 @@ def main(question: str | None = None) -> None:
     tracer = Tracer()
     cost = CostTracker(model=CONFIG.llm.model)
 
-    # 1. 构建并装载 RAG 知识库
+    # 1. 构建并装载 RAG 知识库（内容未变时复用已落盘索引，秒级启动）
     knowledge_dir = CONFIG.rag.knowledge_dir
-    print(f"==== 构建 RAG 知识库 ({knowledge_dir}) ====")
+    force_rebuild = "--rebuild" in sys.argv
+    print(f"==== 装载 RAG 知识库 ({knowledge_dir}) ====")
     rag = build_pipeline(CONFIG, tracer)
-    n = rag.ingest_dir(knowledge_dir)
-    print(f"已索引 {n} 个 chunk")
+    import time as _time
+    _t0 = _time.time()
+    n = rag.ingest_dir(knowledge_dir, force=force_rebuild)
+    _elapsed = _time.time() - _t0
+    if force_rebuild:
+        print(f"已重建索引: {n} 个 chunk, 耗时 {_elapsed:.1f}s")
+    else:
+        print(f"已装载 {n} 个 chunk ({_elapsed:.1f}s)")
     set_pipeline(rag)
     clear_cache()
 
