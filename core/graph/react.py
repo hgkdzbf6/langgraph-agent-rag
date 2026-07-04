@@ -140,9 +140,10 @@ def make_react_reason(llm: LLMClient, cfg: Config, tracer: Tracer):
 def make_react_observe(cfg: Config, tracer: Tracer, llm: LLMClient | None = None):
     """观察节点：判断是否继续工具循环、是否子任务完成。
 
-    完成判定：最近一条 assistant 无 tool_calls 视为给出最终答复；
-    或达到 max_react_steps 强制收尾（避免死循环）。
-    强制收尾时若有 llm，会再做一次"基于已有信息总结"的调用，避免直接丢弃结果。
+    完成判定（任一满足即结束该子任务）：
+    - 最近一条 assistant 无 tool_calls → 已给出最终答复；
+    - 达到 max_react_steps → 强制收尾（让 LLM 基于已有信息总结）；
+    - 检测到连续重复检索（query 高度相似）→ 信息已充分，提前收尾。
     """
     def node(state: AgentState) -> AgentState:
         idx = state["current_index"]
@@ -154,18 +155,22 @@ def make_react_observe(cfg: Config, tracer: Tracer, llm: LLMClient | None = None
                 last_asst = m
                 break
         finished = last_asst is not None and not last_asst.get("tool_calls")
+        should_force = (
+            sub["react_steps"] >= cfg.max_react_steps
+            or _is_repetitive_retrieval(sub["messages"])
+        )
         if finished:
             sub["result"] = (last_asst or {}).get("content", "")
             sub["status"] = "done"
-        elif sub["react_steps"] >= cfg.max_react_steps:
-            # 步数上限，强制收尾：尝试让 LLM 基于已有信息总结
+        elif should_force:
+            # 步数上限或重复检索，强制收尾：让 LLM 基于已有信息总结
             summary = ""
             if llm is not None:
                 with tracer.span("force_summarize", subtask=idx):
                     try:
                         force_msgs = list(sub["messages"]) + [
                             {"role": "user",
-                             "content": "已达到工具调用次数上限。请不要再调用任何工具，"
+                             "content": "已收集到足够信息。请不要再调用任何工具，"
                                         "直接根据目前已掌握的信息，给出对该子任务的最终答复。"}
                         ]
                         r = llm.chat(force_msgs, scope=f"force#{idx}")
@@ -173,8 +178,44 @@ def make_react_observe(cfg: Config, tracer: Tracer, llm: LLMClient | None = None
                     except Exception:
                         summary = ""
             sub["status"] = "done"
-            sub["result"] = summary or (last_asst or {}).get("content", "") or "(达到步数上限，未能得出结论)"
+            sub["result"] = summary or (last_asst or {}).get("content", "") or "(未能得出结论)"
         sub.pop("_pending_tool_calls", None)
         sub.pop("_last_content", None)
         return {"subtasks": subs}
     return node
+
+
+def _is_repetitive_retrieval(messages: list[dict]) -> bool:
+    """检测最近的工具调用是否在重复检索相似 query。
+
+    若最近 2 次 knowledge_search 的 query 高度相似，说明 Agent 在原地打转，
+    应提前终止 ReAct 循环，避免无意义的 LLM 调用。
+    """
+    # 收集最近的 knowledge_search 调用参数
+    recent_queries: list[str] = []
+    for m in reversed(messages):
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            for tc in m["tool_calls"]:
+                fn = tc.get("function", {}) if "function" in tc else tc
+                name = fn.get("name", tc.get("name", ""))
+                if name == "knowledge_search":
+                    args = fn.get("arguments", tc.get("arguments", {}))
+                    if isinstance(args, str):
+                        import json as _json
+                        try:
+                            args = _json.loads(args)
+                        except Exception:
+                            args = {}
+                    q = args.get("query", "") if isinstance(args, dict) else ""
+                    if q:
+                        recent_queries.append(q)
+        if len(recent_queries) >= 2:
+            break
+    if len(recent_queries) < 2:
+        return False
+    # 简单判断：query 是否高度重叠（字符级 Jaccard）
+    a, b = set(recent_queries[0]), set(recent_queries[1])
+    if not a or not b:
+        return False
+    jaccard = len(a & b) / len(a | b)
+    return jaccard > 0.7  # 阈值：70% 字符重叠视为重复

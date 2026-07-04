@@ -148,14 +148,13 @@ def build_graph(llm: LLMClient, cfg: Config, tracer: Tracer):
         {"react_reason": "react_reason", "advance": "advance"},
     )
 
-    # advance 之后：还有子任务 → react_reason；简单单任务 → direct_answer；否则 → aggregator
+    # advance 之后：还有子任务 → react_reason；单子任务 → direct_answer（跳过 aggregator）；否则 → aggregator
     def after_advance(state: AgentState) -> str:
         idx = state.get("current_index", 0)
         if idx < len(state.get("subtasks", [])):
             return "react_reason"
-        # 简单问题 + 单子任务 → 跳过 Aggregator，直接返回
-        if (state.get("complexity") == "simple"
-                and len(state.get("subtasks", [])) == 1):
+        # 单子任务（无论 simple/complex）直接返回结果，跳过 Aggregator 省一次 LLM 调用
+        if len(state.get("subtasks", [])) == 1:
             return "direct_answer"
         return "aggregator"
 
