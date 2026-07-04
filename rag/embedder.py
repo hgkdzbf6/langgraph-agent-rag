@@ -32,8 +32,12 @@ class GLMEmbedder(Embedder):
     def __init__(self, cfg: EmbedConfig) -> None:
         self.cfg = cfg
         self.dim = cfg.dim
-        self._cache_path = Path(cfg.cache_dir) / "embed_cache.json"
-        self._cache: dict[str, list[float]] = self._load_cache()
+        # 双格式缓存：优先用 numpy 二进制（快），兼容旧 JSON
+        self._cache_dir = Path(cfg.cache_dir)
+        self._cache_npz = self._cache_dir / "embed_cache.npz"
+        self._cache_json = self._cache_dir / "embed_cache.json"
+        self._cache: dict[str, np.ndarray] = self._load_cache()
+        self._dirty = False  # 标记是否有新缓存需落盘
         self._client = None
         if cfg.api_key:
             try:
@@ -42,17 +46,49 @@ class GLMEmbedder(Embedder):
             except Exception:
                 self._client = None
 
-    def _load_cache(self) -> dict[str, list[float]]:
-        if self._cache_path.exists():
+    def _load_cache(self) -> dict[str, np.ndarray]:
+        """加载缓存：优先 numpy 二进制，回退旧 JSON 并自动迁移。"""
+        # 1. numpy 格式（快）
+        if self._cache_npz.exists():
             try:
-                return json.loads(self._cache_path.read_text())
+                data = np.load(self._cache_npz, allow_pickle=False)
+                keys = data["keys"]
+                vecs = data["vecs"]  # [N, dim] float32
+                return {str(k): vecs[i] for i, k in enumerate(keys)}
             except Exception:
-                return {}
+                pass
+        # 2. 旧 JSON 格式（慢，仅用于迁移）
+        if self._cache_json.exists():
+            try:
+                raw = json.loads(self._cache_json.read_text())
+                # 转成 numpy 并立即迁移到 npz
+                migrated = {k: np.asarray(v, dtype=np.float32) for k, v in raw.items()}
+                self._save_cache_npz(migrated)
+                return migrated
+            except Exception:
+                pass
         return {}
 
+    def _save_cache_npz(self, cache: dict[str, np.ndarray]) -> None:
+        """以 numpy 二进制保存，反序列化比 JSON 快数十倍。"""
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        if not cache:
+            return
+        keys = np.asarray(list(cache.keys()))
+        vecs = np.stack(list(cache.values())).astype(np.float32)
+        np.savez(self._cache_npz, keys=keys, vecs=vecs)
+
     def _save_cache(self) -> None:
-        self._cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self._cache_path.write_text(json.dumps(self._cache))
+        if not self._dirty:
+            return
+        self._save_cache_npz(self._cache)
+        # 迁移成功后删除旧 JSON
+        if self._cache_json.exists():
+            try:
+                self._cache_json.unlink()
+            except Exception:
+                pass
+        self._dirty = False
 
     @staticmethod
     def _key(t: str) -> str:
@@ -61,12 +97,14 @@ class GLMEmbedder(Embedder):
     def embed(self, texts: list[str]) -> np.ndarray:
         if not texts:
             return np.zeros((0, self.dim), dtype=np.float32)
-        results: list[list[float] | None] = [None] * len(texts)
+        # 用数组暂存，命中缓存直接取 numpy 向量（零拷贝）
+        results: list[np.ndarray | None] = [None] * len(texts)
         todo: list[tuple[int, str]] = []
         for i, t in enumerate(texts):
             k = self._key(t)
-            if k in self._cache:
-                results[i] = self._cache[k]
+            cached = self._cache.get(k)
+            if cached is not None:
+                results[i] = cached
             else:
                 todo.append((i, t))
 
@@ -82,9 +120,10 @@ class GLMEmbedder(Embedder):
                             model=self.cfg.model, input=[t for _, t in batch]
                         )
                         for (idx, txt), item in zip(batch, resp.data):
-                            vec = item.embedding
+                            vec = np.asarray(item.embedding, dtype=np.float32)
                             results[idx] = vec
                             self._cache[self._key(txt)] = vec
+                            self._dirty = True
                         break
                     except Exception:
                         if attempt < MAX_RETRIES - 1:
@@ -97,9 +136,10 @@ class GLMEmbedder(Embedder):
         # 仍未拿到（无 client 或失败）→ 回退 mock 向量，保证不阻断
         for i, t in enumerate(texts):
             if results[i] is None:
-                results[i] = _hash_vector(t, self.dim)
+                results[i] = np.asarray(_hash_vector(t, self.dim), dtype=np.float32)
 
-        arr = np.asarray(results, dtype=np.float32)
+        # stack 成矩阵（results 元素已是 ndarray）
+        arr = np.stack([np.asarray(r, dtype=np.float32) for r in results])
         # L2 归一化
         norms = np.linalg.norm(arr, axis=1, keepdims=True)
         norms[norms == 0] = 1.0

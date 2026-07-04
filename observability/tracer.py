@@ -2,6 +2,11 @@
 
 不依赖 OpenTelemetry，零额外依赖；run 结束后可打印 trace 树或导出 JSON，
 便于排查 ReAct 循环、Reflection 回退、工具并发等行为。
+
+实现要点（相对初版的修复）：
+- span 的计时由 with 语句 __enter__/__exit__ 严格配对，不依赖全局栈的 pop 顺序；
+- 并发场景下（多工具并发执行）也不会因栈错乱导致 span 计时漂移；
+- parent 关系在 start 时一次性确定，end 只负责盖时间戳，不改父子结构。
 """
 from __future__ import annotations
 
@@ -24,7 +29,10 @@ class Span:
 
     @property
     def elapsed_ms(self) -> float:
-        return round(((self.end or time.time()) - self.start) * 1000, 2)
+        # 仅当 end 已设置时计算；未结束的 span 显示为 0 而非"漂移到当前时间"
+        if self.end is None:
+            return 0.0
+        return round((self.end - self.start) * 1000, 2)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -33,7 +41,12 @@ class Span:
 
 
 class Tracer:
-    """线程安全（用 GIL 简化）的 span 收集器，支持父子层级。"""
+    """span 收集器，支持父子层级与上下文管理器语法。
+
+    线程安全说明：单 Agent 运行内，LLM 调用是同步的、节点是串行的，
+    只有 tool_executor 内部并发。并发工具各自开 span，但每个 span 的
+    __enter__/__exit__ 在同一线程内严格配对，不会跨线程共享 _stack。
+    """
 
     def __init__(self) -> None:
         self.spans: list[Span] = []
@@ -48,12 +61,17 @@ class Tracer:
 
     def end(self, span: Span, status: str = "ok", error: Optional[str] = None,
             **extra_attrs: Any) -> None:
+        # 盖时间戳（这是计时的唯一依据）
         span.end = time.time()
         span.status = status
         span.error = error
         span.attributes.update(extra_attrs)
-        if self._stack and self._stack[-1] == span.span_id:
-            self._stack.pop()
+        # 维护栈：只在该 span 是栈顶时 pop；否则说明嵌套顺序异常，
+        # 从栈中移除该 id（防御性，保证栈不残留已结束的 span）
+        if span.span_id in self._stack:
+            # 移除该 span 及其之后压入的所有 id（它们应已结束）
+            idx = self._stack.index(span.span_id)
+            self._stack = self._stack[:idx]
 
     # 上下文管理器语法糖：with tracer.span("node") as s: ...
     class _Ctx:
@@ -88,7 +106,9 @@ class Tracer:
         def render(parent: Optional[str], depth: int) -> None:
             for s in by_parent.get(parent, []):
                 tag = "✗" if s.status == "error" else "✓"
-                lines.append(f"{'  ' * depth}{tag} {s.name}  [{s.elapsed_ms} ms]"
+                ms = s.elapsed_ms
+                dur = f"{ms:.0f} ms" if ms > 0 else "未结束"
+                lines.append(f"{'  ' * depth}{tag} {s.name}  [{dur}]"
                              + (f"  err={s.error}" if s.error else ""))
                 render(s.span_id, depth + 1)
         render(None, 0)
