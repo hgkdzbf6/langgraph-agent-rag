@@ -106,7 +106,8 @@ def build_graph(llm: LLMClient, cfg: Config, tracer: Tracer):
         g.add_edge(START, "complexity_check")
 
         def after_complexity(state: AgentState) -> str:
-            if state.get("complexity") == "simple":
+            # simple / medium 都直接作为单任务（无需拆解），只有 hard 走 planner
+            if state.get("complexity") in ("simple", "medium"):
                 return "simple_subtask"
             return "planner"
 

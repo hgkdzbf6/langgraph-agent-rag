@@ -34,6 +34,10 @@ class ChatResult:
 
 
 class LLMClient(ABC):
+    def set_thinking(self, mode: str) -> None:
+        """动态切换思维链模式。默认空实现，支持 thinking 的 Provider 覆盖。"""
+        pass
+
     @abstractmethod
     def chat(self, messages: list[dict], *, temperature: float | None = None,
              max_tokens: int | None = None, scope: str = "llm") -> ChatResult:

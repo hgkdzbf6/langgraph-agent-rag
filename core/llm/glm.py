@@ -25,7 +25,18 @@ class GLMClient(LLMClient):
         self.tracer = tracer
         self.cost = cost
         self.cache = cache
+        # thinking 可被 set_thinking 动态切换（由 complexity 节点按难度设置）
+        self._thinking: str = cfg.thinking
         self.client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
+
+    def set_thinking(self, mode: str) -> None:
+        """动态切换思维链模式：'disabled' 关闭（快）/ 'enabled' 开启（准）。
+
+        由 complexity_check 节点按问题难度调用：
+        simple/medium → disabled，hard → enabled。
+        """
+        if mode in ("disabled", "enabled"):
+            self._thinking = mode
 
     def _call(self, messages: list[dict], tools: list[dict] | None,
               temperature: float | None, max_tokens: int | None, scope: str) -> ChatResult:
@@ -44,9 +55,9 @@ class GLMClient(LLMClient):
             "temperature": self.cfg.temperature if temperature is None else temperature,
             "max_tokens": self.cfg.max_tokens if max_tokens is None else max_tokens,
         }
-        # thinking 模式：disabled 关闭思维链（更快），enabled 开启深度推理
-        if self.cfg.thinking in ("disabled", "enabled"):
-            kwargs["extra_body"] = {"thinking": {"type": self.cfg.thinking}}
+        # thinking 模式：按当前动态设置（默认 disabled；hard 问题由 complexity 节点切 enabled）
+        if self._thinking in ("disabled", "enabled"):
+            kwargs["extra_body"] = {"thinking": {"type": self._thinking}}
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"

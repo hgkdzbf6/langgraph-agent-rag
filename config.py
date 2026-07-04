@@ -95,6 +95,7 @@ class Config:
     max_react_steps: int = 3        # 单个子任务内 ReAct 最大轮次
     max_reflections: int = 2        # 单个步骤最多纠错次数
     enable_complexity_check: bool = True   # 启用复杂度前置判断
+    adaptive_thinking: bool = True         # 按问题难度自动开关 thinking 思维链
     enable_reflection: bool = True        # 启用 Reflection 自我纠错
     enable_llm_cache: bool = False        # 启用 LLM 响应缓存
     sandbox_mode: str = "local"           # "local" | "docker"
