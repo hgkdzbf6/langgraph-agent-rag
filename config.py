@@ -34,6 +34,10 @@ class LLMConfig:
     model: str = field(default_factory=lambda: _env("GLM_MODEL", "GLM-5.2"))
     temperature: float = 0.3
     max_tokens: int = 2048
+    # thinking 模式：disabled 关闭思维链（更快、无 reasoning_tokens）；
+    # enabled 开启深度推理（更准、更慢）。默认 disabled 以提升响应速度。
+    # 通过环境变量 ENABLE_THINKING=true 开启。
+    thinking: str = field(default_factory=lambda: "enabled" if _env("ENABLE_THINKING", "").lower() in ("true", "1", "yes") else "disabled")
 
     @property
     def configured(self) -> bool:

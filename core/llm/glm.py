@@ -44,6 +44,9 @@ class GLMClient(LLMClient):
             "temperature": self.cfg.temperature if temperature is None else temperature,
             "max_tokens": self.cfg.max_tokens if max_tokens is None else max_tokens,
         }
+        # thinking 模式：disabled 关闭思维链（更快），enabled 开启深度推理
+        if self.cfg.thinking in ("disabled", "enabled"):
+            kwargs["extra_body"] = {"thinking": {"type": self.cfg.thinking}}
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
